@@ -3,9 +3,15 @@ name: web-clone
 description: >
   网站复刻 / 克隆方法论。USE WHEN 用户说 复刻网站、克隆网站、clone website、抄个站、仿站、
   照着这个站做一个、reproduce site、还原某个网页效果、把这个站搬下来改成我的、
-  复刻某个交互/WebGL/Canvas/Three.js 效果。提供「先拿真源码 → 判路径 → 逆向拆解 →
-  搭工程 → 替换内容」的可移植决策树，覆盖静态站 / React-Vue-Next 内容站 /
-  WebGL-Canvas 重前端站三大分支，并强制核对任何 AI 二手分析里的可执行代码。
+  复刻某个交互/WebGL/Canvas/Three.js 效果、
+  帮我扒一下这个站、帮我爬一下这个网站、把整个网站弄下来、把这个网站备份下来、下载整个网站、
+  做个一模一样的、做一个跟它一样的、做个 1:1 复刻、一比一复刻、做个镜像、整个站点抓下来、
+  把这个站照搬下来、照搬这个站、镜像这个站、做个类似的网站、做个像它这样的、
+  scrap this site、mirror this site、download this site、backup this site、
+  copy this website、make a clone of、rebuild this page。
+  提供「先拿真源码 → 判路径 → 逆向拆解 → 搭工程 → 替换内容」的可移植决策树，
+  覆盖静态站 / React-Vue-Next 内容站 / WebGL-Canvas 重前端站三大分支，
+  并强制核对任何 AI 二手分析里的可执行代码。
 metadata:
   author: jane (xiaoer)
   version: "1.6.0"
