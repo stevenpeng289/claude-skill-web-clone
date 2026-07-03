@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 function parseArgs(argv) {
-  const o = { url: "", out: "", scrollStep: 700, settle: 2500, maxMs: 90000, help: false };
+  const o = { url: "", out: "", scrollStep: 700, settle: 2500, maxMs: 90000, noWebgl: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--help" || a === "-h") o.help = true;
@@ -27,6 +27,7 @@ function parseArgs(argv) {
     else if (a === "--scroll-step") o.scrollStep = parseInt(argv[++i] || "700", 10);
     else if (a === "--settle") o.settle = parseInt(argv[++i] || "2500", 10);
     else if (a === "--max-ms") o.maxMs = parseInt(argv[++i] || "90000", 10);
+    else if (a === "--no-webgl") o.noWebgl = true;
   }
   return o;
 }
@@ -34,11 +35,16 @@ function parseArgs(argv) {
 function usage() {
   console.log(`mirror-site.mjs — 静态构建站全量资产镜像(1:1 忠实复刻)
 
-  node scripts/mirror-site.mjs --url <URL> --out <dir> [--scroll-step 700] [--settle 2500] [--max-ms 90000]
+  node scripts/mirror-site.mjs --url <URL> --out <dir> [--scroll-step 700] [--settle 2500] [--max-ms 90000] [--no-webgl]
 
 适用: Astro / Vite SSG / Hugo / 任何把客户端运行时输出成可下载静态资产的站(含 WebGL/Canvas 重前端)。
 不适用: 真·服务端渲染/数据驱动 SPA(需 network-capture.mjs 做 API 替身)。
-配方与后续改写步骤(自托管字体/删追踪/服务) → references/static-mirror.md`);
+配方与后续改写步骤(自托管字体/删追踪/服务) → references/static-mirror.md。
+
+--no-webgl:  注入 init script 在 page.goto 前禁用 WebGL/WebGPU,避免重 Three.js 站 headless chromium 直接 Page Crashed。
+              此时网络捕获依然完整(请求列表与正常模式一致),只是浏览器不真正执行 shader/canvas 绘制。
+              重 WebGL 站(L4+ 复杂度)首选这个 + --scroll-step 0(只取首屏触发到的资源,不滚动)。
+--scroll-step 0: 跳过全程滚动捕获,只取首屏 + settle 内能触发的请求。配合 --no-webgl 兜底最稳。`);
 }
 
 // 同源资产 URL → 本地相对路径(去 query；目录结尾存 index.html)
@@ -72,17 +78,41 @@ page.on("response", (resp) => {
   } catch {}
 });
 
+// 重 WebGL 站兜底:在 page.goto 之前 init script 干掉 WebGL/WebGPU,避免 chromium 直接 Page Crashed。
+// 影响:浏览器不执行 shader/canvas 绘制,但请求列表与正常模式一致(还是能拿到所有 .wasm/.sog/.riv/字体等运行时 fetch 资源)。
+if (args.noWebgl) {
+  await page.addInitScript(() => {
+    const kill = (proto) => {
+      try {
+        const orig = proto.getContext.bind(proto);
+        proto.getContext = function (type, ...rest) {
+          if (typeof type === "string" && /^(webgl|webgl2|webgpu)/.test(type)) return null;
+          return orig(type, ...rest);
+        };
+      } catch {}
+    };
+    kill(HTMLCanvasElement.prototype);
+    if (navigator.gpu) Object.defineProperty(navigator, "gpu", { get: () => undefined });
+  });
+  console.log("  --no-webgl: WebGL/WebGPU 已在 init script 禁用");
+}
+
 console.log(`▸ 加载 + 全程滚动捕获: ${args.url}`);
 await page.goto(args.url, { waitUntil: "networkidle", timeout: args.maxMs }).catch((e) => console.warn("  goto:", e.message));
-const total = await page.evaluate(() => document.documentElement.scrollHeight);
-for (let y = 0; y <= total; y += args.scrollStep) {
-  await page.evaluate((yy) => window.scrollTo(0, yy), y);
-  await page.waitForTimeout(180);
+if (args.scrollStep > 0) {
+  const total = await page.evaluate(() => document.documentElement.scrollHeight);
+  for (let y = 0; y <= total; y += args.scrollStep) {
+    await page.evaluate((yy) => window.scrollTo(0, yy), y);
+    await page.waitForTimeout(180);
+  }
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(args.settle);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(1200);
+} else {
+  console.log("  --scroll-step 0: 跳过滚动捕获,只取首屏 + settle 内请求");
+  await page.waitForTimeout(args.settle);
 }
-await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-await page.waitForTimeout(args.settle);
-await page.evaluate(() => window.scrollTo(0, 0));
-await page.waitForTimeout(1200);
 
 const all = [...responses.entries()].map(([url, m]) => ({ url, ...m }));
 const ownUrls = all.filter((r) => r.url.startsWith(origin + "/") || r.url === origin || r.url === origin + "/");

@@ -182,6 +182,30 @@ node /Users/jane/.shared-skills/web-clone/scripts/audit-clone.mjs \
 
 **做过 `design-dna.json`（视觉/爆改模式）的**：这一步就是它的兑现——**DNA 留着、内容换掉**。把 `design_system` 落成 CSS 自定义属性、按 `design_style` 做主观取舍、按 `visual_effects.effect_intensity` 选实现层级（lightweight CSS / medium Canvas+GSAP / heavy Three.js）；素材优先用 `asset-harvest.mjs` 取原站真图，别 AI 重绘近似。生成流程见 `references/design-dna.md`。
 
+#### ⚠️ 替换内容时，禁止改这些钩子
+
+JS bundle（Astro/Next/Vue/Three.js 任意）通过**具体 id 和 class 名**挂载行为——`getElementById("nav-about")`、`querySelector(".section1")` 这种硬编码查找。
+
+**绝对不能改：**
+- HTML 元素上的 `id="..."` 属性
+- bundle 显式 `querySelector` 的 class 名
+- data 属性（`data-astro-cid-*`、`data-i`、`data-section` 等）
+
+**可以改：**
+- 元素之间的**文本内容**（`<span>About</span>` → `<span>服务</span>`）
+- 内联 style 或 CSS 变量值
+- `<a>` 的 `href` 值（如果 JS 没显式覆盖）
+
+**症状**：改了 id 之后整站 JS 抛 `Cannot set properties of null (setting 'href')` 然后静默死掉。3D 不渲染、文字不 animate in、看上去像黑屏 / 静态图。grep bundle 找 `getElementById\(['"]` 列所有 id 一一保留。
+
+**实战纪律**：
+```bash
+# 改文案前先抓 bundle 用的所有 id/selector
+grep -oE 'getElementById\(["\x27][^"\x27]+' scripts/*.js | sort -u
+grep -oE 'querySelector\(["\x27][^"\x27]+' scripts/*.js | sort -u
+# 这两份名单就是"不能动的钩子"。改 HTML 时跳过它们，只换内文。
+```
+
 ## 逆向拆解 WebGL/Canvas 重前端（核心手艺）
 
 把交互站拆成**技术支柱**，逐柱定位真实实现 + 标行号：渲染（WebGL/着色器算法）、合成（SVG filter / 多 canvas / 后期）、物理、交互、音频。然后才去核对任何二手分析。

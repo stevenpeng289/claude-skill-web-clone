@@ -70,3 +70,64 @@ python3 -m http.server 8124      # 必须从 site/ 作 web 根，根相对路径
 - 结果：`scrollHeight` 精确一致、**0 console error**、hero 像素 diff **36/1.3M（5/5）**
 - 留在线：Vimeo 画廊视频 + unpkg Rive wasm（非核心）
 - 完整记录：`~/projects/website-clones/oryzo-clone/`（NOTES.md + TEARDOWN.md）
+
+## 兜底：mirror-site 撞 chromium Page Crashed 时的 manual curl 流程
+
+`mirror-site.mjs` 用真 Chromium 加载页面 + 全程滚动，对**重 WebGL/Three.js/WebGPU** 站可能直接 **Page Crashed**（headless chromium GPU 不稳）。这是已知限制，不是 bug。
+
+**症状**：
+```
+▸ 加载 + 全程滚动捕获: https://<重 WebGL 站>/
+  goto: page.goto: Page crashed
+page.evaluate: Target crashed
+```
+进程退出、`<out>/site/` 仍是空目录。
+
+**先用新加的两个选项试**（v1.7+）：
+```bash
+node scripts/mirror-site.mjs --url <URL> --out <dir> --no-webgl --scroll-step 0
+```
+- `--no-webgl`：在 init script 阶段把 `HTMLCanvasElement.prototype.getContext("webgl|webgl2|webgpu")` 返回 `null`，**禁用 Three.js/R3F/Babylon 等启动 WebGL 上下文的尝试**。chromium 不再尝试分配 GPU 显存，**Page Crashed 概率大幅下降**。
+- `--scroll-step 0`：跳过全程滚动捕获，只取首屏 + settle 时间内能触发的请求。
+- 网络请求列表依然完整（`mirror-manifest.json` 正常），bundle/wasm/字体/视频这些**运行时 fetch**的资源不会被丢。
+
+**两个选项都失败时的 manual curl 流程**（最后兜底，仍能做 1:1 复刻）：
+
+1. **先跑 `network-capture.mjs`** 把原站真实请求清单抓到 JSON：
+   ```bash
+   node scripts/network-capture.mjs --url <URL> --out RECON/network --label original
+   ```
+
+2. **从网络清单提取同源 URL**：
+   ```bash
+   jq -r '.requests[].url' RECON/network/original-network.json \
+     | grep -E '^https://<origin>/' | sort -u > /tmp/asset-urls.txt
+   ```
+
+3. **建目录结构 + curl 逐个下载**（按 URL 路径建子目录）：
+   ```bash
+   mkdir -p site/{_astro,fonts,top,audio,draco,basis,icons}
+   while read url; do
+     rel="${url#https://<origin>}"
+     mkdir -p "site/$(dirname "${rel#/}")"
+     curl -sL "$url" -o "site/${rel#/}"
+   done < /tmp/asset-urls.txt
+   ```
+
+4. **HTML 里 Astro hashed 文件名（如 `_astro/CommonScripts.astro_astro_type_script_index_0_lang.DoRTgpqq.js`）** 是 mirror-site 也会保留的真名，但如果你为了管理方便简化了名字，**记得同步改 HTML 引用**（参见 SKILL.md Step 6 "禁止改 id/class" — 文件名不在禁令里）：
+   ```bash
+   python3 -c "
+   import re
+   html = open('site/index.html').read()
+   html = html.replace('CommonScripts.astro_astro_type_script_index_0_lang.DoRTgpqq.js',
+                       'CommonScripts.DoRTgpqq.js')
+   open('site/index.html','w').write(html)
+   "
+   ```
+
+5. **后续手工收尾**走上面 "镜像后的手工收尾" 一节（自托管字体 + 删追踪 + 服务 + 验证）。
+
+**manual curl 与 mirror-site 的产物等价性**：
+- ✅ 字节级 1:1 复刻：能
+- ⚠️ 丢失的：浏览器**没真正渲染**导致没触发的请求（很少，影响的是"页面静止时也常驻的资源"——通常 bundle / WASM / 字体已经覆盖了）
+- ❌ 拿不到的：动态 bundle 里**运行时拼接**且**用户交互后才 fetch** 的资产（如 hover 才加载的高清图）。这种站几乎只能 mirror-site 才行，manual curl 是次优解。
